@@ -8,6 +8,7 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.types import (BufferedInputFile, LabeledPrice, PreCheckoutQuery, 
                            ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton)
+from aiohttp import web
 
 # --- НАСТРОЙКИ ---
 API_TOKEN = '8591021129:AAH1tpaNlpkiUsYCm-IwEhHqp5wYN-bvW1w'
@@ -18,11 +19,23 @@ ADMIN_USERNAME = 'angelovSasha'
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# Базы данных в памяти
 user_languages = {} 
 TEST_MODE = False
 PROMOCodes = {}
 EMOJI_LIST = ["🐱", "🐈", "😻", "🐾", "😼", "😺", "😸", "😽"]
+
+# --- ВЕБ-СЕРВЕР ДЛЯ CRON-JOB ---
+async def handle(request):
+    return web.Response(text="Бот активен! I am alive!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get('/', handle)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    # Порт 10000 стандартный для Render
+    site = web.TCPSite(runner, '0.0.0.0', 10000)
+    await site.start()
 
 # --- ПЕРЕВОДЫ ---
 TEXTS = {
@@ -44,7 +57,6 @@ TEXTS = {
         'wait': "Зачекай 1-2 хвилини і котик з'явиться!",
         'buy_desc': "Додавання 1 кота у ваш пак"
     }
-    # Можно добавить en и pl аналогично
 }
 
 def main_kb(lang):
@@ -66,21 +78,20 @@ async def get_processed_cat_data():
     out_buffer.seek(0)
     return out_buffer.getvalue()
 
-# --- ЛОГИКА АДМИНА (ТЕПЕРЬ ТОЧНО РАБОТАЕТ) ---
-
+# --- АДМИН КОМАНДЫ ---
 @dp.message(F.text == "Test Mode On")
 async def admin_on(message: types.Message):
     if message.from_user.username == ADMIN_USERNAME:
         global TEST_MODE
         TEST_MODE = True
-        await message.answer("🛠 Тестовый режим ВКЛЮЧЕН (Бесплатно)")
+        await message.answer("🛠 Тестовый режим ВКЛЮЧЕН")
 
 @dp.message(F.text == "Test Mode Off")
 async def admin_off(message: types.Message):
     if message.from_user.username == ADMIN_USERNAME:
         global TEST_MODE
         TEST_MODE = False
-        await message.answer("💰 Тестовый режим ВЫКЛЮЧЕН (Платный)")
+        await message.answer("💰 Тестовый режим ВЫКЛЮЧЕН")
 
 @dp.message(F.text.startswith("Free Cat"))
 async def create_promo(message: types.Message):
@@ -94,15 +105,13 @@ async def create_promo(message: types.Message):
             PROMOCodes[code] = {"start": start_dt, "end": end_dt, "used_by": []}
             await message.answer(f"🎫 Промокод {code} создан!")
         except:
-            await message.answer("Ошибка формата! Пример: Free Cat \"CODE\" 26.04.2026 to 27.04.2026")
+            await message.answer("Ошибка формата!")
 
-# --- ОСНОВНАЯ ЛОГИКА ---
-
+# --- ЛОГИКА ПОЛЬЗОВАТЕЛЯ ---
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
-    # По умолчанию ставим русский, если не выбрано
-    user_languages[message.from_user.id] = 'ru' 
-    await message.answer("Привет! Выбери действие на кнопках ниже:", reply_markup=main_kb('ru'))
+    user_languages[message.from_user.id] = 'ru'
+    await message.answer("Привет! Выбери действие:", reply_markup=main_kb('ru'))
 
 @dp.message(F.text.in_(["Инструкция 📖", "Інструкція 📖"]))
 async def send_instruction(message: types.Message):
@@ -127,7 +136,7 @@ async def send_pack_link(message: types.Message):
     lang = user_languages.get(message.from_user.id, 'ru')
     pack_link = f"https://t.me/addstickers/c{message.from_user.id}_by_{BOT_USERNAME}"
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=TEXTS[lang]['link_btn'], url=pack_link)]])
-    await message.answer("Нажмите на кнопку ниже, чтобы открыть ваш пак:", reply_markup=kb, protect_content=True)
+    await message.answer("Ваша ссылка на пак (кнопка):", reply_markup=kb, protect_content=True)
 
 @dp.message(F.text.in_(["Получить котика 🐾", "Отримати котика 🐾"]))
 async def get_cat_req(message: types.Message):
@@ -146,7 +155,6 @@ async def add_cat_to_user(message: types.Message, lang):
     sticker_bytes = await get_processed_cat_data()
     input_file = BufferedInputFile(sticker_bytes, filename="cat.png")
     chosen_emoji = random.choice(EMOJI_LIST)
-    
     try:
         await bot.add_sticker_to_set(user_id=user_id, name=pack_name, 
                                      sticker=types.InputSticker(sticker=input_file, emoji_list=[chosen_emoji], format="static"))
@@ -155,27 +163,7 @@ async def add_cat_to_user(message: types.Message, lang):
         await bot.create_new_sticker_set(user_id=user_id, name=pack_name, title=f"Cats {message.from_user.first_name}",
                                          stickers=[types.InputSticker(sticker=input_file, emoji_list=[chosen_emoji], format="static")],
                                          sticker_format="static")
-        await message.answer("Пак создан! Подожди 1-2 минуты.")
     await message.answer_sticker(sticker=input_file)
-
-# --- ПРОМОКОДЫ ---
-@dp.message(F.text.in_(["Ввести промокод 🎟", "Ввести промокод 🎟"]))
-async def promo_step1(message: types.Message):
-    await message.answer("Напиши свой промокод:")
-
-@dp.message(lambda msg: msg.text in PROMOCodes)
-async def check_promo(message: types.Message):
-    user_id = message.from_user.id
-    code = message.text
-    info = PROMOCodes[code]
-    if user_id in info["used_by"]:
-        await message.answer("❌ Уже использовано!")
-        return
-    if info["start"] <= datetime.now() <= info["end"]:
-        info["used_by"].append(user_id)
-        await add_cat_to_user(message, 'ru')
-    else:
-        await message.answer("❌ Код не активен.")
 
 @dp.pre_checkout_query()
 async def pre_check(query: PreCheckoutQuery):
@@ -185,9 +173,11 @@ async def pre_check(query: PreCheckoutQuery):
 async def pay_ok(message: types.Message):
     await add_cat_to_user(message, 'ru')
 
+# --- ЗАПУСК ---
 async def main():
+    # Запускаем веб-сервер для "будильника"
+    asyncio.create_task(start_web_server())
     await bot.delete_webhook(drop_pending_updates=True)
-    print("Бот запущен!")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
