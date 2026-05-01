@@ -11,7 +11,7 @@ from aiogram.types import (BufferedInputFile, LabeledPrice, PreCheckoutQuery,
 from aiohttp import web
 
 # --- НАСТРОЙКИ ---
-API_TOKEN = '8591021129:AAH1tpaNlpkiUsYCm-IwEhHqp5wYN-bvW1w'
+API_TOKEN = '8591021129:AAGXFaUnu3scHy_bTObqOuToq73hJp6dTlI'
 CAT_API_KEY = 'live_ZR1ZAaKHkb5nkw48XEReMAdjNEOdKbk65WtAVAHlkcEJ2wNQE8NXMiARYspuZLga'
 BOT_USERNAME = 'your_catier_bot' # Укажи юзернейм своего бота без @
 ADMIN_USERNAME = 'angelovSasha'
